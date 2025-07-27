@@ -1,17 +1,8 @@
 [build]
-  # Default build command
   command = "npm run build"
-  # Default publish folder for Vite/React; for Next.js Netlify auto-detects
   publish = "dist"
 
-# Automatically handle SPA routing (works for Vite/React apps)
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
-
-# Optional: enable Next.js plugin only if Next.js is detected
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
-  # Enabled only if Next.js is actually installed in your dependencies
-  enabled = true
