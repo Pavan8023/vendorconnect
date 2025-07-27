@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '@/lib/firebase';
-import { collection, getDocs, query, updateDoc, doc, where, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, updateDoc, where, addDoc, serverTimestamp } from 'firebase/firestore';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import VideoCall from '@/components/VideoCall';
@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { User, LogOut, X, Phone, Minus, Plus, CheckCircle, Package, Clock } from 'lucide-react';
+import { User, LogOut, X, Phone, Minus, Plus, CheckCircle, Package, Clock, MapPin, Edit2, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,6 +27,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import VendorGPTComponent from '@/components/VendorGPT';
 
@@ -40,6 +43,18 @@ interface OrderInterface {
   createdAt: Date;
   wholesalerId: string;
   vendorId: string;
+}
+
+interface UserLocation {
+  pincode?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  latitude?: number;
+  longitude?: number;
+  isManual?: boolean;
+  detectedAt?: string; // ISO string timestamp
+  updatedAt?: string; // ISO string timestamp
 }
 
 const cities = ["All Cities", "Mumbai", "Delhi", "Chennai", "Hyderabad", "Kolkata", "Pune", "Kolhapur"];
@@ -59,6 +74,18 @@ const VendorPage = () => {
   const [quantity, setQuantity] = useState(MIN_ORDER_QUANTITY);
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [videoCallRoom, setVideoCallRoom] = useState('');
+
+  // Location states
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const [showLocationEdit, setShowLocationEdit] = useState(false);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [isSearchingPincode, setIsSearchingPincode] = useState(false);
+  const [locationForm, setLocationForm] = useState({
+    pincode: '',
+    address: '',
+    city: '',
+    state: ''
+  });
 
   // Filter states
   const [selectedCity, setSelectedCity] = useState("All Cities");
@@ -82,6 +109,175 @@ const VendorPage = () => {
     const roomName = `FreshFarm-${product.id}-${product.wholesalerId}`;
     setVideoCallRoom(roomName);
     setShowVideoCall(true);
+  };
+
+  // Location functions
+  const saveUserLocation = async (location: UserLocation) => {
+    if (!user) return;
+    try {
+      // Update user document with location in the users collection
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, { 
+        location: location,
+        updatedAt: new Date() // Add timestamp for when location was updated
+      });
+      console.log('Location saved to user profile successfully');
+    } catch (error) {
+      console.error('Error saving location to database:', error);
+      throw error; // Re-throw to handle in the calling function
+    }
+  };
+
+  // Load user location on component mount
+  useEffect(() => {
+    const loadUserLocation = async () => {
+      if (!user) return;
+      try {
+        // Fetch user document from users collection
+        const userRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userRef);
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          if (userData.location) {
+            setUserLocation(userData.location);
+            console.log('User location loaded:', userData.location);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading user location:', error);
+      }
+    };
+    
+    loadUserLocation();
+  }, [user]);
+
+  const handleDetectLocation = async () => {
+    setIsDetectingLocation(true);
+    
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported by this browser');
+      setIsDetectingLocation(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          
+          // For production, you can integrate with reverse geocoding APIs
+          // For now, using a simple location structure
+          const location: UserLocation = {
+            latitude,
+            longitude,
+            address: `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`,
+            city: 'Auto-detected location',
+            state: 'Unknown',
+            pincode: '',
+            detectedAt: new Date().toISOString(),
+            isManual: false
+          };
+          
+          setUserLocation(location);
+          await saveUserLocation(location);
+          toast.success('Location detected and saved successfully');
+          
+        } catch (error) {
+          console.error('Error getting location details:', error);
+          toast.error('Failed to save location details');
+        } finally {
+          setIsDetectingLocation(false);
+        }
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        let errorMessage = 'Failed to detect location. Please add manually.';
+        
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = 'Location access denied. Please enable location permissions and try again.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = 'Location information unavailable. Please add location manually.';
+            break;
+          case error.TIMEOUT:
+            errorMessage = 'Location request timed out. Please try again.';
+            break;
+        }
+        
+        toast.error(errorMessage);
+        setIsDetectingLocation(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000, // 15 seconds timeout
+        maximumAge: 300000 // Accept 5-minute old location
+      }
+    );
+  };
+
+  const handlePincodeSearch = async () => {
+    if (locationForm.pincode.length !== 6) return;
+    
+    setIsSearchingPincode(true);
+    
+    try {
+      const response = await fetch(`https://api.postalpincode.in/pincode/${locationForm.pincode}`);
+      const data = await response.json();
+      
+      if (data[0].Status === 'Success' && data[0].PostOffice.length > 0) {
+        const postOffice = data[0].PostOffice[0];
+        setLocationForm({
+          ...locationForm,
+          city: postOffice.District,
+          state: postOffice.State,
+          address: `${postOffice.Name}, ${postOffice.District}, ${postOffice.State}`
+        });
+        toast.success('Location details filled from pincode');
+      } else {
+        toast.error('Invalid pincode or no data found');
+      }
+    } catch (error) {
+      console.error('Error searching pincode:', error);
+      toast.error('Failed to search pincode');
+    } finally {
+      setIsSearchingPincode(false);
+    }
+  };
+
+  const handleSaveLocation = async () => {
+    try {
+      // Validate required fields
+      if (!locationForm.city || !locationForm.pincode) {
+        toast.error('Please fill in at least city and pincode');
+        return;
+      }
+
+      // Validate pincode format (assuming Indian pincode)
+      if (!/^\d{6}$/.test(locationForm.pincode)) {
+        toast.error('Please enter a valid 6-digit pincode');
+        return;
+      }
+
+      const location: UserLocation = {
+        pincode: locationForm.pincode,
+        address: locationForm.address,
+        city: locationForm.city,
+        state: locationForm.state,
+        isManual: true,
+        updatedAt: new Date().toISOString()
+      };
+      
+      setUserLocation(location);
+      await saveUserLocation(location);
+      setShowLocationEdit(false);
+      setLocationForm({ pincode: '', address: '', city: '', state: '' });
+      toast.success('Location saved successfully');
+    } catch (error) {
+      console.error('Error saving location:', error);
+      toast.error('Failed to save location. Please try again.');
+    }
   };
 
   // Fetch user's bid requests
@@ -356,7 +552,7 @@ const VendorPage = () => {
               )}
             </Button>
 
-            {/* Profile Dropdown */}
+            {/* Profile Dropdown with Location */}
             <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -416,6 +612,84 @@ const VendorPage = () => {
                       )}
                     </span>
                   </div>
+                </div>
+
+                {/* Location Section */}
+                <div className="p-3 border-b">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-gray-500">Location</p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleDetectLocation}
+                      disabled={isDetectingLocation}
+                      className="text-xs p-1 h-6"
+                    >
+                      {isDetectingLocation ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <MapPin className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                  
+                  {userLocation ? (
+                    <div className="space-y-2">
+                      <div className="flex items-start space-x-2">
+                        <MapPin className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{userLocation.city}</p>
+                          <p className="text-xs text-gray-500 truncate">{userLocation.address}</p>
+                          {userLocation.pincode && (
+                            <p className="text-xs text-gray-500">PIN: {userLocation.pincode}</p>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowLocationEdit(true)}
+                        className="w-full text-xs h-7"
+                      >
+                        <Edit2 className="h-3 w-3 mr-1" />
+                        Edit Location
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-400">No location set</p>
+                      <div className="space-y-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDetectLocation}
+                          disabled={isDetectingLocation}
+                          className="w-full text-xs h-7"
+                        >
+                          {isDetectingLocation ? (
+                            <>
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              Detecting...
+                            </>
+                          ) : (
+                            <>
+                              <MapPin className="h-3 w-3 mr-1" />
+                              Auto Detect
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setShowLocationEdit(true)}
+                          className="w-full text-xs h-7"
+                        >
+                          <Edit2 className="h-3 w-3 mr-1" />
+                          Add Manually
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <DropdownMenuItem onClick={handleLogout}>
@@ -617,6 +891,89 @@ const VendorPage = () => {
         )}
       </main>
 
+      {/* Location Edit Modal */}
+      {showLocationEdit && (
+        <Dialog open={showLocationEdit} onOpenChange={setShowLocationEdit}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Set Your Location</DialogTitle>
+              <DialogDescription>
+                Enter your address details or pincode to set your location.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="pincode">Pincode</Label>
+                <Input
+                  id="pincode"
+                  placeholder="Enter 6-digit pincode"
+                  value={locationForm.pincode}
+                  onChange={(e) => setLocationForm({...locationForm, pincode: e.target.value})}
+                  maxLength={6}
+                />
+                {locationForm.pincode && locationForm.pincode.length === 6 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePincodeSearch}
+                    disabled={isSearchingPincode}
+                    className="text-xs"
+                  >
+                    {isSearchingPincode ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Searching...
+                      </>
+                    ) : (
+                      'Auto-fill from Pincode'
+                    )}
+                  </Button>
+                )}
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="address">Address</Label>
+                <Textarea
+                  id="address"
+                  placeholder="Enter your full address"
+                  value={locationForm.address}
+                  onChange={(e) => setLocationForm({...locationForm, address: e.target.value})}
+                  rows={3}
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label htmlFor="city">City</Label>
+                  <Input
+                    id="city"
+                    placeholder="City"
+                    value={locationForm.city}
+                    onChange={(e) => setLocationForm({...locationForm, city: e.target.value})}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="state">State</Label>
+                  <Input
+                    id="state"
+                    placeholder="State"
+                    value={locationForm.state}
+                    onChange={(e) => setLocationForm({...locationForm, state: e.target.value})}
+                  />
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowLocationEdit(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveLocation} disabled={!locationForm.city || !locationForm.pincode}>
+                Save Location
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       
       <MyBidsModal
         isOpen={showMyBids}
@@ -836,7 +1193,6 @@ const VendorPage = () => {
 
       <VendorGPTComponent
         onProductSelect={handleProductSelect}
-        userLocation={`${user?.displayName || 'vendor'}-location`}
       />
 
       <Footer />

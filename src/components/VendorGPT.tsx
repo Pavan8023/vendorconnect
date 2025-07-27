@@ -1,7 +1,8 @@
 // src/components/VendorGPT.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,18 +13,32 @@ import VendorGPT from '../lib/vendorGPT';
 import { toast } from 'sonner';
 import { Product, ChatMessage as ChatMessageType } from '../types';
 
-interface VendorGPTProps {
-  onProductSelect?: (product: Product) => void;
-  userLocation?: string;
+interface UserLocation {
+  pincode?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  latitude?: number;
+  longitude?: number;
+  isManual?: boolean;
+  detectedAt?: string;
+  updatedAt?: string;
 }
 
-const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLocation }) => {
+interface VendorGPTProps {
+  onProductSelect?: (product: Product) => void;
+  userLocation?: string; // Keep for backward compatibility
+}
+
+const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLocation: propUserLocation }) => {
   const [user] = useAuthState(auth);
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [currentUserLocation, setCurrentUserLocation] = useState<UserLocation | null>(null);
+  const [locationString, setLocationString] = useState<string>('Unknown');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const vendorGPTRef = useRef<VendorGPT | null>(null);
@@ -33,6 +48,52 @@ const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLoc
   useEffect(() => {
     vendorGPTRef.current = new VendorGPT();
   }, []);
+
+  // Fetch user location from Firestore
+  useEffect(() => {
+    const fetchUserLocation = async () => {
+      if (!user) return;
+
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userRef);
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          if (userData.location) {
+            setCurrentUserLocation(userData.location);
+            
+            // Create a readable location string
+            const location = userData.location as UserLocation;
+            let locationStr = 'Unknown';
+            
+            if (location.city && location.state) {
+              locationStr = `${location.city}, ${location.state}`;
+              if (location.pincode) {
+                locationStr += ` (${location.pincode})`;
+              }
+            } else if (location.city) {
+              locationStr = location.city;
+            } else if (location.address) {
+              locationStr = location.address;
+            }
+            
+            setLocationString(locationStr);
+            console.log('VendorGPT: User location loaded:', locationStr);
+          } else {
+            // Use prop location as fallback
+            setLocationString(propUserLocation || 'Unknown');
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching user location:', error);
+        // Use prop location as fallback
+        setLocationString(propUserLocation || 'Unknown');
+      }
+    };
+
+    fetchUserLocation();
+  }, [user, propUserLocation]);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -65,15 +126,16 @@ const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLoc
     scrollToBottom();
   }, [messages]);
 
-  // Welcome message
+  // Welcome message with location info
   useEffect(() => {
     if (isOpen && messages.length === 0) {
       const welcomeMessage: ChatMessageType = {
         id: 'welcome',
         message: `Hello! 👋 I'm VendorGPT, your AI-powered procurement assistant.
 
+${locationString !== 'Unknown' ? `📍 **Your Location:** ${locationString}\n` : ''}
 I can help you:
-• **Find fresh produce** from verified suppliers
+• **Find fresh produce** from verified suppliers${locationString !== 'Unknown' ? ' near you' : ''}
 • **Compare prices** across multiple vendors
 • **Create bid requests** when products aren't available
 • **Connect with nearby suppliers** instantly
@@ -81,13 +143,13 @@ I can help you:
 Just tell me what you need! For example:
 - "I need 10kg onions within ₹300"
 - "Show me tomato suppliers near me"
-- "Create a bid for 50kg potatoes"`,
+- "Create a bid for 50kg potatoes"${locationString !== 'Unknown' ? `\n- "Find vegetables suppliers in ${currentUserLocation?.city || 'my area'}"` : ''}`,
         isBot: true,
         timestamp: new Date()
       };
       setMessages([welcomeMessage]);
     }
-  }, [isOpen, messages.length]);
+  }, [isOpen, messages.length, locationString, currentUserLocation]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -109,12 +171,13 @@ Just tell me what you need! For example:
     setIsLoading(true);
 
     try {
+      // Pass the detected location and full location object to VendorGPT
       const botResponse = await vendorGPTRef.current.processMessage(
         currentInput,
-        userLocation,
+        locationString,
         user.uid,
         user.displayName || 'User',
-        user.email || ''
+        user.email || '',
       );
 
       setMessages(prev => [...prev, botResponse]);
@@ -197,7 +260,14 @@ Just tell me what you need! For example:
                     <div className="p-2 bg-white/20 rounded-full">
                       <Bot className="h-5 w-5" />
                     </div>
-                    <span>VendorGPT</span>
+                    <div className="flex flex-col">
+                      <span>VendorGPT</span>
+                      {locationString !== 'Unknown' && (
+                        <span className="text-xs font-normal opacity-90">
+                          📍 {locationString}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 bg-green-300 rounded-full animate-pulse" />
