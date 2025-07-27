@@ -7,7 +7,7 @@ import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 import VideoCall from '@/components/VideoCall';
 import MyBidsModal from '@/components/MyBidsModal';
-import MyOrdersModal from '@/components/MyOrdersModal';
+import MyOrdersModal from '@/components/MyOrderModal';
 import type { Product, BidRequest, Order } from '@/types';
 import {
   DropdownMenu,

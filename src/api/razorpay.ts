@@ -1,4 +1,3 @@
-// src/api/razorpay.ts
 import axios from 'axios';
 
 export const createRazorpayOrder = async (amount: number) => {
