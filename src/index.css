@@ -1,0 +1,133 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* VendorConnect Design System - Warm, trustworthy colors for food platform */
+    --background: 45 15% 97%;
+    --foreground: 25 25% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 25 25% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 25 25% 15%;
+
+    /* Primary: Warm orange representing street food vibrancy */
+    --primary: 25 95% 53%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 25 85% 65%;
+
+    /* Secondary: Earthy brown for trust and reliability */
+    --secondary: 25 35% 25%;
+    --secondary-foreground: 45 15% 97%;
+
+    /* Muted: Warm neutral */
+    --muted: 45 10% 92%;
+    --muted-foreground: 25 15% 45%;
+
+    /* Accent: Fresh green for success and growth */
+    --accent: 120 40% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 45 15% 88%;
+    --input: 45 15% 88%;
+    --ring: 25 95% 53%;
+
+    /* Custom design tokens */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-warm: linear-gradient(180deg, hsl(var(--background)), hsl(45 20% 95%));
+    --shadow-warm: 0 10px 25px -5px hsl(var(--primary) / 0.1);
+    --shadow-card: 0 4px 15px -3px hsl(25 25% 15% / 0.1);
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 25 25% 8%;
+    --foreground: 45 15% 95%;
+
+    --card: 25 20% 12%;
+    --card-foreground: 45 15% 95%;
+
+    --popover: 25 20% 12%;
+    --popover-foreground: 45 15% 95%;
+
+    --primary: 25 85% 55%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 25 75% 65%;
+
+    --secondary: 25 15% 85%;
+    --secondary-foreground: 25 25% 15%;
+
+    --muted: 25 15% 18%;
+    --muted-foreground: 45 10% 65%;
+
+    --accent: 120 35% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 25 15% 20%;
+    --input: 25 15% 20%;
+    --ring: 25 85% 55%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-warm: linear-gradient(180deg, hsl(var(--background)), hsl(25 20% 10%));
+    --shadow-warm: 0 10px 25px -5px hsl(var(--primary) / 0.2);
+    --shadow-card: 0 4px 15px -3px hsl(0 0% 0% / 0.3);
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+@layer base {
+  :root {
+    --gradient-warm: linear-gradient(135deg, #fdfcfb 0%, #e2d1c3 100%);
+    --gradient-primary: linear-gradient(to right, #4ade80, #22d3ee);
+    --shadow-warm: 0 4px 20px rgba(0, 0, 0, 0.08);
+    --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.05);
+    --transition-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
