@@ -7,7 +7,7 @@ import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
 
 import VideoCall from '@/components/VideoCall';
-
+import type { Product } from '@/types';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,23 +27,8 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { toast } from 'sonner';
+import VendorGPTComponent from '@/components/VendorGPT';
 
-interface Product {
-  id: string;
-  name: string;
-  description: string;
-  address: string;
-  city: string; // Added city field
-  mobileNo: string;
-  countryCode: string;
-  price: number;
-  minOrder: number; // Minimum order quantity
-  quantity: number; // Total available stock
-  imageUrl: string;
-  wholesalerId: string;
-  wholesalerName?: string;
-  wholesalerPhoto?: string;
-}
 
 interface Order {
   id: string;
@@ -79,6 +64,12 @@ const VendorPage = () => {
   const [selectedCity, setSelectedCity] = useState("All Cities");
   const [selectedPriceRange, setSelectedPriceRange] = useState("All Prices");
   const [searchQuery, setSearchQuery] = useState("");
+
+  const handleProductSelect = (product: Product) => {
+    setSelectedProduct(product);
+    console.log('Selected product:', product);
+    // Add any other logic you need when a product is selected
+  };
 
   const startVideoCall = (product: Product) => {
     // Generate unique room name using product ID and wholesaler ID
@@ -724,6 +715,10 @@ const VendorPage = () => {
           }}
         />
       )}
+      <VendorGPTComponent
+        onProductSelect={handleProductSelect}
+        userLocation={`${user?.displayName || 'vendor'}-location`}
+      />
     </div>
   );
 };
