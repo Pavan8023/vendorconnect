@@ -1,6 +1,11 @@
 [build]
-  publish = "dist"      # or whatever your build folder is
   command = "npm run build"
+  publish = "dist"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+  enabled = false
+
 
 [[redirects]]
   from = "/*"
