@@ -2,12 +2,13 @@
 import { useState, useEffect } from 'react';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db } from '@/lib/firebase';
-import { collection, getDocs, query, updateDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, query, updateDoc, doc, where, addDoc, serverTimestamp } from 'firebase/firestore';
 import { Header } from '@/components/Header';
 import { Footer } from '@/components/Footer';
-
 import VideoCall from '@/components/VideoCall';
-import type { Product } from '@/types';
+import MyBidsModal from '@/components/MyBidsModal';
+import MyOrdersModal from '@/components/MyOrdersModal';
+import type { Product, BidRequest, Order } from '@/types';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { User, LogOut, X, Phone, Minus, Plus, CheckCircle } from 'lucide-react';
+import { User, LogOut, X, Phone, Minus, Plus, CheckCircle, Package, Clock } from 'lucide-react';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -29,8 +30,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from 'sonner';
 import VendorGPTComponent from '@/components/VendorGPT';
 
-
-interface Order {
+interface OrderInterface {
   id: string;
   productId: string;
   productName: string;
@@ -45,7 +45,7 @@ interface Order {
 const cities = ["All Cities", "Mumbai", "Delhi", "Chennai", "Hyderabad", "Kolkata", "Pune", "Kolhapur"];
 const priceRanges = ["All Prices", "₹0-500", "₹500-1000", "₹1000+"];
 const RAZORPAY_LINK = "https://rzp.io/rzp/mog0llFL";
-const MIN_ORDER_QUANTITY = 5; // Fixed minimum order quantity
+const MIN_ORDER_QUANTITY = 5;
 
 const VendorPage = () => {
   const [user] = useAuthState(auth);
@@ -55,7 +55,7 @@ const VendorPage = () => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [orderSuccess, setOrderSuccess] = useState<Order | null>(null);
+  const [orderSuccess, setOrderSuccess] = useState<OrderInterface | null>(null);
   const [quantity, setQuantity] = useState(MIN_ORDER_QUANTITY);
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [videoCallRoom, setVideoCallRoom] = useState('');
@@ -65,17 +65,78 @@ const VendorPage = () => {
   const [selectedPriceRange, setSelectedPriceRange] = useState("All Prices");
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Bid management states
+  const [myBidRequests, setMyBidRequests] = useState<BidRequest[]>([]);
+  const [showMyBids, setShowMyBids] = useState(false);
+
+  // Orders management states
+  const [myOrders, setMyOrders] = useState<Order[]>([]);
+  const [showMyOrders, setShowMyOrders] = useState(false);
+
   const handleProductSelect = (product: Product) => {
     setSelectedProduct(product);
     console.log('Selected product:', product);
-    // Add any other logic you need when a product is selected
   };
 
   const startVideoCall = (product: Product) => {
-    // Generate unique room name using product ID and wholesaler ID
     const roomName = `FreshFarm-${product.id}-${product.wholesalerId}`;
     setVideoCallRoom(roomName);
     setShowVideoCall(true);
+  };
+
+  // Fetch user's bid requests
+  const fetchMyBidRequests = async () => {
+    if (!user) return;
+    
+    try {
+      const bidRequestsRef = collection(db, 'bidRequests');
+      const q = query(bidRequestsRef, where('vendorId', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+
+      const requests: BidRequest[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        requests.push({ 
+          id: doc.id, 
+          ...data,
+          createdAt: data.createdAt?.toDate() || new Date(),
+          acceptedAt: data.acceptedAt?.toDate(),
+          orderPlacedAt: data.orderPlacedAt?.toDate(),
+        } as BidRequest);
+      });
+
+      setMyBidRequests(requests.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+    } catch (error) {
+      console.error("Error fetching bid requests:", error);
+      toast.error("Failed to fetch bid requests");
+    }
+  };
+
+  // Fetch user's orders
+  const fetchMyOrders = async () => {
+    if (!user) return;
+    
+    try {
+      const ordersRef = collection(db, 'orders');
+      const q = query(ordersRef, where('vendorId', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+
+      const ordersList: Order[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        ordersList.push({ 
+          id: doc.id, 
+          ...data,
+          createdAt: data.createdAt?.toDate() || new Date(),
+          estimatedDelivery: data.estimatedDelivery?.toDate(),
+        } as Order);
+      });
+
+      setMyOrders(ordersList.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+      toast.error("Failed to fetch orders");
+    }
   };
 
   useEffect(() => {
@@ -92,7 +153,6 @@ const VendorPage = () => {
           const data = doc.data();
           productsData.push({
             id: doc.id,
-            // Set city to the city field or extract from address if not present
             city: data.city || (data.address ? data.address.split(' ').pop() : 'Unknown'),
             ...data
           } as Product);
@@ -125,6 +185,7 @@ const VendorPage = () => {
         setFilteredProducts(productsWithWholesalers);
       } catch (error) {
         console.error("Error fetching data:", error);
+        toast.error("Failed to load products");
       } finally {
         setLoading(false);
       }
@@ -132,6 +193,18 @@ const VendorPage = () => {
 
     fetchProductsAndWholesalers();
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      fetchMyBidRequests();
+      fetchMyOrders();
+      const interval = setInterval(() => {
+        fetchMyBidRequests();
+        fetchMyOrders();
+      }, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
 
   useEffect(() => {
     // Apply filters whenever they change
@@ -171,7 +244,6 @@ const VendorPage = () => {
 
   useEffect(() => {
     if (selectedProduct) {
-      // Set initial quantity to minimum order quantity (5)
       setQuantity(MIN_ORDER_QUANTITY);
     }
   }, [selectedProduct]);
@@ -179,8 +251,10 @@ const VendorPage = () => {
   const handleLogout = async () => {
     try {
       await auth.signOut();
+      toast.success("Logged out successfully");
     } catch (error) {
       console.error("Logout failed:", error);
+      toast.error("Failed to log out");
     }
   };
 
@@ -198,8 +272,6 @@ const VendorPage = () => {
 
   const handleQuantityChange = (value: number) => {
     if (!selectedProduct) return;
-
-    // Ensure quantity is at least MIN_ORDER_QUANTITY and not more than available stock
     const newQuantity = Math.max(MIN_ORDER_QUANTITY, value);
     setQuantity(Math.min(newQuantity, selectedProduct.quantity));
   };
@@ -208,11 +280,9 @@ const VendorPage = () => {
     if (!selectedProduct || !user) return;
 
     try {
-      // Open Razorpay payment link
       window.open(RAZORPAY_LINK, '_blank');
 
-      // Create order record
-      const order: Order = {
+      const order: OrderInterface = {
         id: `order_${Date.now()}`,
         productId: selectedProduct.id,
         productName: selectedProduct.name,
@@ -224,24 +294,24 @@ const VendorPage = () => {
         vendorId: user.uid
       };
 
-      // Update product stock in Firestore
       const productRef = doc(db, 'products', selectedProduct.id);
       await updateDoc(productRef, {
         quantity: selectedProduct.quantity - quantity
       });
 
-      // Update local state
       setProducts(products.map(p =>
         p.id === selectedProduct.id
           ? { ...p, quantity: p.quantity - quantity }
           : p
       ));
 
-      // Show success
       setOrderSuccess(order);
       setShowSuccess(true);
       setSelectedProduct(null);
-
+      
+      // Refresh orders list
+      fetchMyOrders();
+      
       toast.success('Order placed successfully!');
     } catch (error) {
       console.error('Payment error:', error);
@@ -255,73 +325,106 @@ const VendorPage = () => {
       <header className="border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-xl font-bold text-green-700">Vendor Dashboard</h1>
-          <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                className="rounded-full p-1 border border-gray-200"
-              >
-                {user?.photoURL ? (
-                  <img
-                    src={user.photoURL}
-                    alt="Profile"
-                    className="w-8 h-8 rounded-full"
-                  />
-                ) : (
-                  <div className="bg-gray-200 border-2 border-dashed rounded-xl w-8 h-8" />
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-64" align="end">
-              <div className="p-3 border-b">
-                <div className="flex items-center space-x-3">
+          
+          <div className="flex items-center space-x-4">
+            {/* My Bids Button */}
+            <Button 
+              variant="outline" 
+              onClick={() => setShowMyBids(true)}
+              className="relative"
+            >
+              📋 My Bids
+              {myBidRequests.filter(bid => bid.status === 'order_placed').length > 0 && (
+                <span className="absolute -top-2 -right-2 bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                  {myBidRequests.filter(bid => bid.status === 'order_placed').length}
+                </span>
+              )}
+            </Button>
+
+            {/* My Orders Button */}
+            <Button 
+              variant="outline" 
+              onClick={() => setShowMyOrders(true)}
+              className="relative"
+            >
+              <Package className="h-4 w-4 mr-2" />
+              My Orders
+              {myOrders.filter(order => ['confirmed', 'shipped'].includes(order.status)).length > 0 && (
+                <span className="absolute -top-2 -right-2 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                  {myOrders.filter(order => ['confirmed', 'shipped'].includes(order.status)).length}
+                </span>
+              )}
+            </Button>
+
+            {/* Profile Dropdown */}
+            <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="rounded-full p-1 border border-gray-200"
+                >
                   {user?.photoURL ? (
                     <img
                       src={user.photoURL}
                       alt="Profile"
-                      className="w-10 h-10 rounded-full"
+                      className="w-8 h-8 rounded-full"
                     />
                   ) : (
-                    <div className="bg-gray-200 border-2 border-dashed rounded-xl w-10 h-10" />
+                    <div className="bg-gray-200 border-2 border-dashed rounded-xl w-8 h-8" />
                   )}
-                  <div>
-                    <p className="font-medium">{user?.displayName || 'User'}</p>
-                    <p className="text-sm text-gray-500 truncate">{user?.email}</p>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-64" align="end">
+                <div className="p-3 border-b">
+                  <div className="flex items-center space-x-3">
+                    {user?.photoURL ? (
+                      <img
+                        src={user.photoURL}
+                        alt="Profile"
+                        className="w-10 h-10 rounded-full"
+                      />
+                    ) : (
+                      <div className="bg-gray-200 border-2 border-dashed rounded-xl w-10 h-10" />
+                    )}
+                    <div>
+                      <p className="font-medium">{user?.displayName || 'User'}</p>
+                      <p className="text-sm text-gray-500 truncate">{user?.email}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="p-3 border-b">
-                <p className="text-sm text-gray-500 mb-1">Account Type</p>
-                <div className="flex items-center">
-                  <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded">
-                    Vendor
-                  </span>
-                  <span className="ml-2 flex items-center text-sm">
-                    {user?.providerData[0]?.providerId === 'google.com' ? (
-                      <>
-                        <svg className="h-4 w-4 mr-1" viewBox="0 0 24 24">
-                          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
-                          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
-                          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
-                          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
-                          <path d="M1 1h22v22H1z" fill="none" />
-                        </svg>
-                        Google
-                      </>
-                    ) : (
-                      'Email'
-                    )}
-                  </span>
+                <div className="p-3 border-b">
+                  <p className="text-sm text-gray-500 mb-1">Account Type</p>
+                  <div className="flex items-center">
+                    <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded">
+                      Vendor
+                    </span>
+                    <span className="ml-2 flex items-center text-sm">
+                      {user?.providerData[0]?.providerId === 'google.com' ? (
+                        <>
+                          <svg className="h-4 w-4 mr-1" viewBox="0 0 24 24">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                            <path d="M1 1h22v22H1z" fill="none" />
+                          </svg>
+                          Google
+                        </>
+                      ) : (
+                        'Email'
+                      )}
+                    </span>
+                  </div>
                 </div>
-              </div>
 
-              <DropdownMenuItem onClick={handleLogout}>
-                <LogOut className="mr-2 h-4 w-4" />
-                <span>Log out</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Log out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </header>
 
@@ -421,7 +524,7 @@ const VendorPage = () => {
               </svg>
             </div>
             <h3 className="text-lg font-medium text-gray-700">No products found</h3>
-            <p className="text-gray-500 mt-1">Try adjusting your filters or search term</p>
+            <p className="text-gray-500 mt-1">Try adjusting your filters, search term, or use VendorGPT to create a bid request</p>
             <Button variant="outline" className="mt-4" onClick={handleClearFilters}>
               Clear Filters
             </Button>
@@ -513,7 +616,21 @@ const VendorPage = () => {
           </div>
         )}
       </main>
-      <Footer />
+
+      
+      <MyBidsModal
+        isOpen={showMyBids}
+        onClose={() => setShowMyBids(false)}
+        bidRequests={myBidRequests}
+        onRefresh={fetchMyBidRequests}
+      />
+
+      <MyOrdersModal
+        isOpen={showMyOrders}
+        onClose={() => setShowMyOrders(false)}
+        orders={myOrders}
+        onRefresh={fetchMyOrders}
+      />
 
       {/* Product Detail Modal */}
       {selectedProduct && (
@@ -705,6 +822,7 @@ const VendorPage = () => {
           </div>
         </div>
       )}
+
       {showVideoCall && (
         <VideoCall
           roomName={videoCallRoom}
@@ -715,10 +833,13 @@ const VendorPage = () => {
           }}
         />
       )}
+
       <VendorGPTComponent
         onProductSelect={handleProductSelect}
         userLocation={`${user?.displayName || 'vendor'}-location`}
       />
+
+      <Footer />
     </div>
   );
 };

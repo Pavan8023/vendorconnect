@@ -1,7 +1,8 @@
+// src/lib/vendorGPT.ts
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, addDoc, query, where } from 'firebase/firestore';
 import { db } from './firebase';
-import { Product, ChatMessage } from '../types';
+import { Product, ChatMessage, BidRequest } from '../types';
 
 // Initialize Google AI
 const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GOOGLE_AI_API_KEY);
@@ -13,7 +14,13 @@ class VendorGPT {
     this.model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
   }
 
-  async processMessage(userMessage: string, userLocation?: string): Promise<ChatMessage> {
+  async processMessage(
+    userMessage: string, 
+    userLocation?: string,
+    userId?: string,
+    userName?: string,
+    userEmail?: string
+  ): Promise<ChatMessage> {
     try {
       // Extract product requirements using AI
       const extractionPrompt = `
@@ -25,10 +32,11 @@ class VendorGPT {
           "quantity": "extracted quantity with unit",
           "budget": "extracted budget if mentioned",
           "urgency": "immediate/today/tomorrow/this_week",
-          "intent": "buy/inquiry/price_check/availability"
+          "intent": "buy/inquiry/price_check/availability/bid"
         }
         
         If information is missing, set to null.
+        If user mentions wanting to bid or make a request when product not found, set intent to "bid".
       `;
 
       const extractionResult = await this.model.generateContent(extractionPrompt);
@@ -48,11 +56,53 @@ class VendorGPT {
         if (relevantProducts.length > 0) {
           botResponse = this.generateProductResponse(extractedData, relevantProducts);
         } else {
-          botResponse = `Sorry, I couldn't find any ${extractedData.product_type} suppliers in your area right now. Would you like me to:
-          
-1. Search in nearby areas (within 10km)?
-2. Notify you when suppliers become available?
-3. Suggest alternative products?`;
+          // No products found - offer bidding option
+          botResponse = `Sorry, I couldn't find any ${extractedData.product_type} suppliers in your area right now. 
+
+Would you like to:
+1. **Create a Bid Request** - Tell wholesalers what you need and your budget
+2. Search in nearby areas (within 10km)?
+3. Get notified when suppliers become available?
+
+To create a bid request, just say something like:
+"I want to bid ₹${extractedData.budget || '50'} for ${extractedData.quantity || '10kg'} ${extractedData.product_type}"`;
+        }
+      } else if (extractedData?.intent === 'bid' || userMessage.toLowerCase().includes('bid')) {
+        // Handle bid creation
+        if (userId && userName && userEmail && extractedData?.product_type) {
+          const bidId = await this.createBidRequest({
+            vendorId: userId,
+            vendorName: userName,
+            vendorEmail: userEmail,
+            productName: extractedData.product_type,
+            description: `Looking for ${extractedData.product_type}`,
+            quantity: this.parseQuantity(extractedData.quantity) || 10,
+            bidPrice: this.parseBudget(extractedData.budget) || 0,
+            urgency: extractedData.urgency || 'this_week',
+            location: userLocation || 'Not specified'
+          });
+
+          botResponse = `✅ **Bid Request Created Successfully!**
+
+**Request Details:**
+- Product: ${extractedData.product_type}
+- Quantity: ${this.parseQuantity(extractedData.quantity) || 10} units
+- Your Bid: ₹${this.parseBudget(extractedData.budget) || 'Not specified'}
+- Urgency: ${extractedData.urgency || 'This week'}
+
+Your request has been sent to all nearby wholesalers. You'll be notified when someone accepts your bid!
+
+**Request ID:** ${bidId}`;
+        } else {
+          botResponse = `To create a bid request, I need more details:
+
+Please provide:
+- What product do you need?
+- How much quantity?
+- Your budget per unit
+- When do you need it?
+
+Example: "I need 20kg onions, budget ₹30 per kg, needed tomorrow"`;
         }
       } else {
         // General conversation or clarification
@@ -61,6 +111,7 @@ class VendorGPT {
           User said: "${userMessage}"
           
           Context: You help vendors find fresh vegetables, fruits, and ingredients from local suppliers.
+          You also help them create bid requests when products aren't available.
           
           Respond in a helpful, friendly manner. If they need suppliers, ask for:
           - What product they need
@@ -94,6 +145,34 @@ class VendorGPT {
         timestamp: new Date()
       };
     }
+  }
+
+  private async createBidRequest(bidData: Omit<BidRequest, 'id' | 'status' | 'createdAt'>): Promise<string> {
+    try {
+      const bidRequest: Omit<BidRequest, 'id'> = {
+        ...bidData,
+        status: 'pending',
+        createdAt: new Date()
+      };
+
+      const docRef = await addDoc(collection(db, 'bidRequests'), bidRequest);
+      return docRef.id;
+    } catch (error) {
+      console.error('Error creating bid request:', error);
+      throw error;
+    }
+  }
+
+  private parseQuantity(quantityStr: string): number {
+    if (!quantityStr) return 10;
+    const numbers = quantityStr.match(/\d+/g);
+    return numbers ? parseInt(numbers[0]) : 10;
+  }
+
+  private parseBudget(budgetStr: string): number {
+    if (!budgetStr) return 0;
+    const numbers = budgetStr.match(/\d+/g);
+    return numbers ? parseInt(numbers[0]) : 0;
   }
 
   private parseAIResponse(response: string): any {

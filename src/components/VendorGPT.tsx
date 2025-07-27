@@ -1,8 +1,11 @@
+// src/components/VendorGPT.tsx
 import React, { useState, useRef, useEffect } from 'react';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Send, MessageCircle, X, Mic, MicOff } from 'lucide-react';
+import { Send, MessageCircle, X, Mic, MicOff, Bot, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ChatMessage from './ChatMessage';
 import VendorGPT from '../lib/vendorGPT';
@@ -15,12 +18,13 @@ interface VendorGPTProps {
 }
 
 const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLocation }) => {
+  const [user] = useAuthState(auth);
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const vendorGPTRef = useRef<VendorGPT | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -37,7 +41,7 @@ const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLoc
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'hi-IN';
+      recognitionRef.current.lang = 'en-US';
 
       recognitionRef.current.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
@@ -66,15 +70,18 @@ const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLoc
     if (isOpen && messages.length === 0) {
       const welcomeMessage: ChatMessageType = {
         id: 'welcome',
-        message: `नमस्ते! 🙏 मैं VendorGPT हूँ।
+        message: `Hello! 👋 I'm VendorGPT, your AI-powered procurement assistant.
 
-मैं आपकी मदद कर सकता हूँ:
-• ताज़ी सब्जियां और फल खोजने में
-• नजदीकी suppliers से संपर्क करने में  
-• कीमतों की तुलना करने में
+I can help you:
+• **Find fresh produce** from verified suppliers
+• **Compare prices** across multiple vendors
+• **Create bid requests** when products aren't available
+• **Connect with nearby suppliers** instantly
 
-बताइए आज आपको क्या चाहिए? 
-जैसे: "10kg प्याज चाहिए, budget ₹300"`,
+Just tell me what you need! For example:
+- "I need 10kg onions within ₹300"
+- "Show me tomato suppliers near me"
+- "Create a bid for 50kg potatoes"`,
         isBot: true,
         timestamp: new Date()
       };
@@ -87,7 +94,7 @@ const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLoc
   };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading || !vendorGPTRef.current) return;
+    if (!inputMessage.trim() || isLoading || !vendorGPTRef.current || !user) return;
 
     const userMessage: ChatMessageType = {
       id: `user_${Date.now()}`,
@@ -102,12 +109,19 @@ const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLoc
     setIsLoading(true);
 
     try {
-      const botResponse = await vendorGPTRef.current.processMessage(currentInput, userLocation);
+      const botResponse = await vendorGPTRef.current.processMessage(
+        currentInput,
+        userLocation,
+        user.uid,
+        user.displayName || 'User',
+        user.email || ''
+      );
+
       setMessages(prev => [...prev, botResponse]);
     } catch (error) {
       console.error('Chat error:', error);
       toast.error('Something went wrong. Please try again.');
-      
+
       // Add error message
       const errorMessage: ChatMessageType = {
         id: `error_${Date.now()}`,
@@ -152,9 +166,17 @@ const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLoc
       >
         <Button
           onClick={() => setIsOpen(!isOpen)}
-          className="w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 shadow-lg border-0"
+          className="relative w-16 h-16 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-lg border-0 overflow-hidden group"
         >
-          {isOpen ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
+          <div className="absolute inset-0 bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+          {isOpen ? (
+            <X className="h-6 w-6 text-white" />
+          ) : (
+            <>
+              <MessageCircle className="h-6 w-6 text-white" />
+              <Sparkles className="absolute top-1 right-1 h-3 w-3 text-yellow-300 animate-pulse" />
+            </>
+          )}
         </Button>
       </motion.div>
 
@@ -166,22 +188,27 @@ const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLoc
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="fixed bottom-24 right-6 w-96 h-[500px] z-40"
+            className="fixed bottom-24 right-6 w-96 h-[600px] z-40"
           >
-            <Card className="h-full flex flex-col shadow-2xl border">
-              <CardHeader className="pb-3 border-b">
-                <CardTitle className="text-lg flex items-center">
-                  <span className="mr-2">🤖</span>
-                  VendorGPT
-                  <span className="ml-auto text-sm font-normal text-green-600">
-                    Online
-                  </span>
+            <Card className="h-full flex flex-col shadow-2xl border-0 bg-white/95 backdrop-blur-sm">
+              <CardHeader className="pb-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-t-lg">
+                <CardTitle className="text-lg flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-white/20 rounded-full">
+                      <Bot className="h-5 w-5" />
+                    </div>
+                    <span>VendorGPT</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-green-300 rounded-full animate-pulse" />
+                    <span className="text-sm font-normal">Online</span>
+                  </div>
                 </CardTitle>
               </CardHeader>
 
               <CardContent className="flex-1 flex flex-col p-0 overflow-hidden">
                 {/* Messages Container */}
-                <div className="flex-1 overflow-y-auto px-4 py-2">
+                <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-gray-50/50">
                   {messages.map((message) => (
                     <ChatMessage
                       key={message.id}
@@ -189,59 +216,98 @@ const VendorGPTComponent: React.FC<VendorGPTProps> = ({ onProductSelect, userLoc
                       onProductSelect={onProductSelect}
                     />
                   ))}
-                  
+
                   {isLoading && (
-                    <div className="flex justify-start mb-4">
-                      <div className="bg-gray-100 rounded-lg p-3">
-                        <div className="flex space-x-1">
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="flex justify-start"
+                    >
+                      <div className="bg-white rounded-2xl p-4 shadow-sm">
+                        <div className="flex space-x-1.5">
+                          <motion.div
+                            className="w-2.5 h-2.5 bg-green-500 rounded-full"
+                            animate={{ y: [0, -8, 0] }}
+                            transition={{ duration: 0.6, repeat: Infinity, delay: 0 }}
+                          />
+                          <motion.div
+                            className="w-2.5 h-2.5 bg-green-500 rounded-full"
+                            animate={{ y: [0, -8, 0] }}
+                            transition={{ duration: 0.6, repeat: Infinity, delay: 0.2 }}
+                          />
+                          <motion.div
+                            className="w-2.5 h-2.5 bg-green-500 rounded-full"
+                            animate={{ y: [0, -8, 0] }}
+                            transition={{ duration: 0.6, repeat: Infinity, delay: 0.4 }}
+                          />
                         </div>
                       </div>
-                    </div>
+                    </motion.div>
                   )}
-                  
+
                   <div ref={messagesEndRef} />
                 </div>
 
                 {/* Input Area */}
-                <div className="border-t p-4">
+                <div className="border-t bg-white p-4">
                   <div className="flex space-x-2">
-                    <Input
-                      value={inputMessage}
-                      onChange={(e) => setInputMessage(e.target.value)}
-                      onKeyDown={handleKeyPress}
-                      placeholder="Type your message... (Hindi/English)"
-                      disabled={isLoading}
-                      className="flex-1"
-                    />
-                    
-                    <Button
-                      onClick={handleVoiceInput}
-                      variant="outline"
-                      size="icon"
-                      className={isListening ? 'bg-red-100 border-red-300' : ''}
-                      disabled={isLoading}
-                    >
-                      {isListening ? (
-                        <MicOff className="h-4 w-4 text-red-500" />
-                      ) : (
-                        <Mic className="h-4 w-4" />
-                      )}
-                    </Button>
-                    
-                    <Button
-                      onClick={handleSendMessage}
-                      disabled={!inputMessage.trim() || isLoading}
-                      size="icon"
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
+                    <div className="flex-1 relative">
+                      <Input
+                        value={inputMessage}
+                        onChange={(e) => setInputMessage(e.target.value)}
+                        onKeyDown={handleKeyPress}
+                        placeholder="Ask me anything..."
+                        disabled={isLoading}
+                        className="pr-10 bg-gray-50 border-gray-200 focus:border-green-400 focus:ring-green-400"
+                      />
+                    </div>
+
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button
+                        onClick={handleVoiceInput}
+                        variant="outline"
+                        size="icon"
+                        className={`${
+                          isListening
+                            ? 'bg-red-50 border-red-300 hover:bg-red-100'
+                            : 'hover:bg-gray-50 border-gray-200'
+                        } transition-colors`}
+                        disabled={isLoading}
+                      >
+                        {isListening ? (
+                          <MicOff className="h-4 w-4 text-red-500" />
+                        ) : (
+                          <Mic className="h-4 w-4 text-gray-600" />
+                        )}
+                      </Button>
+                    </motion.div>
+
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button
+                        onClick={handleSendMessage}
+                        disabled={!inputMessage.trim() || isLoading}
+                        className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white"
+                        size="icon"
+                      >
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </motion.div>
                   </div>
-                  
-                  <div className="text-xs text-gray-500 mt-2 text-center">
-                    प्रेस Enter भेजने के लिए • 🎤 बोलने के लिए
+
+                  <div className="flex items-center justify-center gap-4 text-xs text-gray-500 mt-3">
+                    <span className="flex items-center gap-1">
+                      <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px]">Enter</kbd>
+                      to send
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      <Mic className="h-3 w-3" />
+                      Voice input
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      💰 Create bids
+                    </span>
                   </div>
                 </div>
               </CardContent>
